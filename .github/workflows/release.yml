@@ -6,7 +6,7 @@ on:
       - '*'
 
 env:
-  DEVELOPER_DIR: /Applications/Xcode_15.2.app/Contents/Developer
+  DEVELOPER_DIR: /Applications/Xcode_15.4.app/Contents/Developer
   IOS_DEPLOYMENT_TARGET: '13.0'
   MAC_DEPLOYMENT_TARGET: '11.0'
   MAC_CATALYST_DEPLOYMENT_TARGET: '13.1'
@@ -438,7 +438,7 @@ jobs:
 
   ios:
     needs: [setup]
-    runs-on: macos-13
+    runs-on: macos-14
     strategy:
       matrix:
         opencv-version: [2.4.13.7, 3.4.20, 4.10.0]
@@ -481,18 +481,13 @@ jobs:
     - name: package
       run: |
         rm -rf opencv2.framework
-        mkdir -p opencv2.framework/Versions/A/Headers
-        mkdir -p opencv2.framework/Versions/A/Resources
-        ln -s A opencv2.framework/Versions/Current
-        ln -s Versions/Current/Headers opencv2.framework/Headers
-        ln -s Versions/Current/Resources opencv2.framework/Resources
-        ln -s Versions/Current/opencv2 opencv2.framework/opencv2
+        mkdir -p opencv2.framework/Headers
         lipo -create \
             ${{ env.SOURCE_DIR }}/build-arm64/install/lib/libopencv_world.a \
-            -o opencv2.framework/Versions/A/opencv2
-        cp -r ${{ env.SOURCE_DIR }}/build-arm64/install/include/opencv4/opencv2/* opencv2.framework/Versions/A/Headers/ || :
-        cp -r ${{ env.SOURCE_DIR }}/build-arm64/install/include/opencv2/* opencv2.framework/Versions/A/Headers/ || :
-        cp ${{ env.SOURCE_DIR }}/Info.plist opencv2.framework/Versions/A/Resources/
+            -o opencv2.framework/opencv2
+        cp -r ${{ env.SOURCE_DIR }}/build-arm64/install/include/opencv4/opencv2/* opencv2.framework/Headers/ || :
+        cp -r ${{ env.SOURCE_DIR }}/build-arm64/install/include/opencv2/* opencv2.framework/Headers/ || :
+        cp ${{ env.SOURCE_DIR }}/Info.plist opencv2.framework/
         rm -f ${{ env.PACKAGE_NAME }}.zip
         zip -9 -y -r ${{ env.PACKAGE_NAME }}.zip opencv2.framework
     - name: test
@@ -510,7 +505,7 @@ jobs:
 
   ios-simulator:
     needs: [setup]
-    runs-on: macos-13
+    runs-on: macos-14
     strategy:
       matrix:
         opencv-version: [2.4.13.7, 3.4.20, 4.10.0]
@@ -562,19 +557,14 @@ jobs:
     - name: package
       run: |
         rm -rf opencv2.framework
-        mkdir -p opencv2.framework/Versions/A/Headers
-        mkdir -p opencv2.framework/Versions/A/Resources
-        ln -s A opencv2.framework/Versions/Current
-        ln -s Versions/Current/Headers opencv2.framework/Headers
-        ln -s Versions/Current/Resources opencv2.framework/Resources
-        ln -s Versions/Current/opencv2 opencv2.framework/opencv2
+        mkdir -p opencv2.framework/Headers
         lipo -create \
             ${{ env.SOURCE_DIR }}/build-x86_64/install/lib/libopencv_world.a \
             ${{ env.SOURCE_DIR }}/build-arm64/install/lib/libopencv_world.a \
-            -o opencv2.framework/Versions/A/opencv2
-        cp -r ${{ env.SOURCE_DIR }}/build-x86_64/install/include/opencv4/opencv2/* opencv2.framework/Versions/A/Headers/ || :
-        cp -r ${{ env.SOURCE_DIR }}/build-x86_64/install/include/opencv2/* opencv2.framework/Versions/A/Headers/ || :
-        cp ${{ env.SOURCE_DIR }}/Info.plist opencv2.framework/Versions/A/Resources/
+            -o opencv2.framework/opencv2
+        cp -r ${{ env.SOURCE_DIR }}/build-x86_64/install/include/opencv4/opencv2/* opencv2.framework/Headers/ || :
+        cp -r ${{ env.SOURCE_DIR }}/build-x86_64/install/include/opencv2/* opencv2.framework/Headers/ || :
+        cp ${{ env.SOURCE_DIR }}/Info.plist opencv2.framework/
         rm -f ${{ env.PACKAGE_NAME }}.zip
         zip -9 -y -r ${{ env.PACKAGE_NAME }}.zip opencv2.framework
     - name: test
@@ -1734,6 +1724,46 @@ jobs:
         name: ${{ env.PACKAGE_NAME }}
         path: ${{ env.PACKAGE_NAME }}.zip
 
+  ios-xcframework:
+    needs: [ios, ios-simulator]
+    runs-on: macos-14
+    strategy:
+      matrix:
+        opencv-version: [2.4.13.7, 3.4.20, 4.10.0]
+    steps:
+    - run: sudo xcode-select --switch /Applications/Xcode_15.4.app
+    - uses: actions/checkout@v4
+    - name: setup-opencv-package
+      run: |
+        echo "IOS_PACKAGE_NAME=opencv-mobile-${{ matrix.opencv-version }}-ios" >> $GITHUB_ENV
+        echo "IOS_SIMULATOR_PACKAGE_NAME=opencv-mobile-${{ matrix.opencv-version }}-ios-simulator" >> $GITHUB_ENV
+        echo "PACKAGE_NAME=opencv-mobile-${{ matrix.opencv-version }}-ios-xcframework" >> $GITHUB_ENV
+    - name: download-ios-package
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.IOS_PACKAGE_NAME }}
+    - name: download-ios-simulator-package
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.IOS_SIMULATOR_PACKAGE_NAME }}
+    - name: create-xcframwork
+      run: |
+        mkdir -p ${{ env.IOS_PACKAGE_NAME }}
+        mkdir -p ${{ env.IOS_SIMULATOR_PACKAGE_NAME }}
+        unzip -q ${{ env.IOS_PACKAGE_NAME }}.zip -d ${{ env.IOS_PACKAGE_NAME }}
+        unzip -q ${{ env.IOS_SIMULATOR_PACKAGE_NAME }}.zip -d ${{ env.IOS_SIMULATOR_PACKAGE_NAME }}
+        xcodebuild -create-xcframework \
+            -framework ${{ env.IOS_PACKAGE_NAME }}/opencv2.framework \
+            -framework ${{ env.IOS_SIMULATOR_PACKAGE_NAME }}/opencv2.framework \
+            -output opencv2.xcframework
+        rm -f ${{ env.PACKAGE_NAME }}.zip
+        zip -9 -y -r ${{ env.PACKAGE_NAME }}.zip opencv2.xcframework
+    - name: upload-zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.PACKAGE_NAME }}
+        path: ${{ env.PACKAGE_NAME }}.zip
+
   devboard:
     needs: [setup]
     runs-on: ubuntu-latest
@@ -1890,7 +1920,7 @@ jobs:
   release:
     permissions:
       contents: write  # for softprops/action-gh-release to create a release
-    needs: [setup, android, harmonyos, ios, ios-simulator, armlinux, macos, mac-catalyst, watchos, watchos-simulator, tvos, tvos-simulator, visionos, visionos-simulator, windows, ubuntu, webassembly, apple, devboard]
+    needs: [setup, android, harmonyos, ios, ios-simulator, armlinux, macos, mac-catalyst, watchos, watchos-simulator, tvos, tvos-simulator, visionos, visionos-simulator, windows, ubuntu, webassembly, apple, ios-xcframework, devboard]
     runs-on: ubuntu-latest
     steps:
     - name: download
